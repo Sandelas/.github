@@ -1,0 +1,13 @@
+{
+    "name": "shared-workflow Workflow",
+    "description": "HCADevOpsPortal Share-Workflow template.",
+    "iconName": "example-icon",
+    "categories": [
+        "Go"
+    ],
+    "filePatterns": [
+        "package.json$",
+        "^Dockerfile",
+        ".*\\.md$"
+    ]
+}

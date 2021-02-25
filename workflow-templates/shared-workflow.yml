@@ -1,0 +1,125 @@
+name: Build 
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+env:
+  AZURE_WEBAPP_NAME: HCADevOps.sln     # set this to your application's name 
+
+jobs:
+  build:
+    name: Build and Deploy
+    runs-on: [self-hosted, X64, Windows]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup MSBuild path
+      uses: microsoft/setup-msbuild@v1
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v1.0.5
+    - name: Restore NuGet packages
+      run: nuget restore ${{ env.AZURE_WEBAPP_NAME }}
+    - name: Build
+      run: msbuild ${{ env.AZURE_WEBAPP_NAME }} /p:Configuration=Release 
+    - name: Publish artifacts
+      uses: actions/upload-artifact@v1.0.0
+      with:
+        name: webapp
+        path: HCADevOps
+  push-analysis:
+      name: SonarQube Analysis for Code Push
+      if: ${{ github.event_name != 'pull_request'}}
+      runs-on: [self-hosted, X64, Windows]
+      steps:
+      - uses: actions/checkout@v2
+      - uses: mathrix-education/sonar-scanner@1.0.0
+        env:
+          ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+          GITHUB_TOKEN: ${{ secrets.VSGITHUB_TOKEN }}  
+        with:
+          version: 4.2.0.1873
+          scan: true
+          args: --debug -Dsonar.login=${{ secrets.AZSONAR_TOKEN }}          
+                 -Dsonar.host.url=${{ secrets.AZSONAR_HOST_NAME }}                      
+                 -Dsonar.projectKey=${{ secrets.AZSONAR_PROJECT_KEY }}
+                 -Dsonar.projectName=${{ secrets.AZPROJECT_NAME }}
+                 -Dsonar.sources=. 
+                 -Dsonar.sourceEncoding=UTF-8
+                 -Dsonar.projectVersion=${{ steps.context.outputs.version }}
+                 -Dsonar.scm.revision=${{ github.event.pull_request.head.sha }}
+                 -Dsonar.scm.provider=git
+                 -Dsonar.java.binaries=/tmp
+  pr-analysis:
+      name: SonarQube Analysis for Pull Request
+      if: ${{ github.event_name == 'pull_request'}}
+      runs-on: [self-hosted, X64, Windows]
+      steps:
+      - uses: actions/checkout@v2
+      - uses: mathrix-education/sonar-scanner@1.0.0
+        env:
+          ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+          GITHUB_TOKEN: ${{ secrets.VSGITHUB_TOKEN }}  
+        with:
+          version: 4.2.0.1873
+          scan: true
+          args: --debug -Dsonar.login=${{ secrets.AZSONAR_TOKEN }}          
+                  -Dsonar.host.url=${{ secrets.AZSONAR_HOST_NAME }}                      
+                  -Dsonar.projectKey=${{ secrets.AZSONAR_PROJECT_KEY }}
+                  -Dsonar.projectName=${{ secrets.AZPROJECT_NAME }}
+                  -Dsonar.sources=. 
+                  -Dsonar.sourceEncoding=UTF-8
+                  -Dsonar.projectVersion=${{ steps.context.outputs.version }}
+                  -Dsonar.pullrequest.key=${{ github.event.number }}
+                  -Dsonar.pullrequest.branch=${{ github.HEAD_REF }}
+                  -Dsonar.pullrequest.base=${{ github.BASE_REF }}
+                  -Dsonar.pullrequest.github.repository=${{ github.repository }}
+                  -Dsonar.scm.revision=${{ github.event.pull_request.head.sha }}
+                  -Dsonar.scm.provider=git
+                  -Dsonar.java.binaries=/tmp 
+  checkmarx-flow:
+    name: Checkmarx Scanning
+    runs-on: [self-hosted, X64, Linux, onprem2]   
+    steps:
+    - uses: actions/checkout@v2
+    - name: Checkmarx Scanning
+      uses: checkmarx-ts/checkmarx-cxflow-github-action@v1.0-9.x
+     #  uses: checkmarx-ts/checkmarx-cxflow-github-action@v1.1
+      with:
+        project: ${{ secrets.VSPROJECT_NAME }}
+        team: ${{ secrets.VSCHECKMARX_TEAM}}
+      #   team: CxServer/Sx/Cx/IPS/XXX/CorpAppSvcs worked!
+        preset: ${{ secrets.VSPRESET }}
+        incremental: false
+        checkmarx_url: ${{ secrets.VSCHECKMARX_URL }}
+        checkmarx_username: ${{ secrets.VSCHECKMARX_USERNAME }}
+        checkmarx_password: ${{ secrets.VSCHECKMARX_PASSWORD }}
+        checkmarx_client_secret: ${{ secrets.VSCHECKMARX_CLIENT_SECRET }}
+        github_token: ${{ secrets.VSGITHUB_TOKEN }}
+        bug_tracker: Sarif
+         
+  #Checkmarx-SCA:
+  #  name: CxSCA
+  #  runs-on: [self-hosted, X64, Linux, onprem2] 
+  #  steps:
+  #  - uses: actions/checkout@v2
+   # - name: Checkmarx SCA Action
+     # uses: checkmarx-ts/checkmarx-cxflow-github-action@v1.0-9.x
+      # uses: checkmarx-ts/checkmarx-cxflow-github-action@v1.1
+   #   uses: checkmarx-ts/checkmarx-cxflow-github-action@v1.1
+   #   with:
+    #    project: ${{ secrets.VSPROJECT_NAME }}
+        sca_api_url: https://api.scacheckmarx.com
+        sca_app_url: https://sca.scacheckmarx.com
+        sca_access_control_url: https://platform.checkmarx.net
+        sca_tenant: HCA  # <-- Insert Checkmarx CxSCA Tenant
+        sca_username: ${{ secrets.CHECKMARX_SCA_USERNAME }} 
+        sca_password: ${{ secrets.CHECKMARX_SCA_PASSWORD }} 
+        break_build: false
+        scanners: sca
+        params: --namespace=${{ github.repository_owner }} --repo-name=${{ github.event.repository.name }} --branch=${{ github.ref }} --repo-url="<GitHubRepoUrl>"
+
+    # Upload SARIF report for CodeQL / Security Alerts PRocessing
+    - name: Upload SARIF file
+      uses: github/codeql-action/upload-sarif@v1
+      with:
+        sarif_file: cx.sarif
